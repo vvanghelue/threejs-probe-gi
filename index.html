@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="icon" href="data:," />
+    <title>Probe Volume GI — three.js</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+
+    <div id="loader">
+      <div class="card">
+        <h1>Probe Volume GI</h1>
+        <p>Baking irradiance probes on the GPU…</p>
+        <div class="track"><div id="bar"></div></div>
+        <div id="status">Preparing</div>
+      </div>
+    </div>
+
+    <div id="hud">
+      <div class="row">
+        <button id="btn-gi" class="active">GI</button>
+        <button id="btn-shadows" class="active">Shadows</button>
+        <button id="btn-ao" class="active">AO</button>
+        <button id="btn-probes">Probes</button>
+        <button id="btn-exp" class="active">Auto exp.</button>
+        <select id="quality">
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </div>
+      <label class="row tod">Sun <input id="tod" type="range" min="0.04" max="0.96" step="0.005" value="0.3" /></label>
+      <div class="row small"><span id="fps"></span> · <span id="stats"></span> · <span id="baketime"></span></div>
+    </div>
+    <div id="rebake">Re-baking GI</div>
+
+    <div id="help">
+      <b>Walk around</b><br />
+      <span class="desk">WASD / arrows · mouse to look (click) · click / F throw a ball · Shift run · Space jump</span>
+      <span class="touch">Left thumb: move · right thumb: look · ● throws a ball</span><br />
+      Move the <i>Sun</i> slider to re-bake the probes at runtime.
+      <button id="help-close">OK</button>
+    </div>
+
+    <div id="joy"><div id="knob"></div></div>
+    <button id="btn-jump">⤒</button>
+    <button id="btn-throw">●</button>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
