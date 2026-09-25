@@ -4,12 +4,15 @@ import Stats from 'three/addons/libs/stats.module.js';
 import { ProbeGI } from './gi.js';
 import { SunShadows } from './sun.js';
 import { SSAO } from './ao.js';
-import { buildWorld } from './scene.js';
+import { SCENES, pickScene } from './scenes/index.js';
 import { Input, Player } from './controls.js';
 import { Balls } from './balls.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
+const reloadWith = (key, value) => { params.set(key, value); location.search = params.toString(); };
+const S = pickScene(params.get('scene')); // scene definition (src/scenes/*.js)
+document.title = `Probe Volume GI — ${S.name} — three.js`;
 const isMobile = matchMedia('(pointer: coarse)').matches || /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent);
 const PRESETS = {
   // cascades: [radius m, resolution] near -> far, re-rendered every frame around the camera
@@ -21,7 +24,7 @@ const qName = PRESETS[params.get('quality')] ? params.get('quality') : isMobile 
 const Q = PRESETS[qName];
 // live-tweakable settings (lil-gui); GI-affecting ones trigger a re-bake
 const cfg = {
-  timeOfDay: 0.3,
+  timeOfDay: S.defaultTimeOfDay ?? 0.3,
   sunIntensity: 3.4,
   bounces: Q.bounces,
   exposure: 0.65,
@@ -36,6 +39,7 @@ const cfg = {
   pixelRatio: Math.min(devicePixelRatio, Q.dpr),
 };
 $('quality').value = qName;
+for (const s of SCENES) $('scene').add(new Option(s.name, s.id, false, s === S));
 
 // ---------------------------------------------------------------- renderer
 const canvas = $('c');
@@ -94,7 +98,7 @@ scene.add(sky);
 // cascaded sun shadows (near cascades follow the camera, static wide map for bake + far)
 const sun = new SunShadows(renderer, scene, {
   near: Q.cascades.map(([radius, res]) => ({ radius, res })),
-  stat: { radius: 80, res: Q.staticRes, center: [0, 0, 0] },
+  stat: { radius: S.shadow.radius, res: Q.staticRes, center: S.shadow.center },
 });
 sun.onBeforeShadow = () => (sky.visible = false);
 sun.onAfterShadow = () => (sky.visible = true);
@@ -118,10 +122,10 @@ function setTimeOfDay(t) {
   skyUniforms.horizon.value.setRGB(0.9, 0.5, 0.3).lerp(new THREE.Color(0.62, 0.72, 0.9), hi);
   scene.fog.color.copy(skyUniforms.horizon.value);
 }
-scene.fog = new THREE.Fog(0x9fb4d0, 120, 520);
+scene.fog = new THREE.Fog(0x9fb4d0, S.fog.near, S.fog.far);
 
 // ---------------------------------------------------------------- world
-const world = buildWorld();
+const world = S.build();
 // GI + sun injection into built-in materials
 function patch(mat, opts) {
   gi.patchMaterial(mat, opts);
@@ -134,23 +138,13 @@ const staticMesh = new THREE.Mesh(world.geometry, staticMat);
 staticMesh.frustumCulled = false;
 scene.add(staticMesh);
 
-// probe volumes: coarse global fallback + fine local volumes around interiors
-const fs = Q.fine;
-gi.addVolume('global', [-66, 0.5, -66], [66, 12.5, 66], Q.coarse);
-gi.addVolume('building', [-14 - 2 * fs - 0.2, 0.75, -10 - 2 * fs - 0.2], [14 + 2 * fs + 0.2, 9.6, 10 + 2 * fs + 0.2], [fs, fs, fs]);
-world.houses.forEach((h, i) =>
-  gi.addVolume(`house${i}`, [h.min[0] - 2 * fs, 0.75, h.min[2] - 2 * fs], [h.max[0] + 2 * fs, 3.8, h.max[2] + 2 * fs], [fs, fs, fs]),
-);
+// probe volumes: coarse global fallback + fine local volumes around interiors (per scene)
+for (const [name, min, max, spacing] of S.volumes(Q.fine, Q, world)) gi.addVolume(name, min, max, spacing);
 gi.build(world.solids);
 
 // dynamic objects: receive GI from the probe volume (not baked, layer 1)
 const dynMat = patch(new THREE.MeshStandardMaterial({ color: 0xf2f2f2, roughness: 0.35, metalness: 0 }), { specular: true });
-const dyn = [
-  { path: (t) => new THREE.Vector3(Math.sin(t * 0.25) * 2, 1.2, -14 + Math.cos(t * 0.25) * 11), r: 0.6 }, // plaza <-> lobby
-  { path: (t) => new THREE.Vector3(-9 + Math.sin(t * 0.7) * 3, 1.4 + Math.sin(t * 1.3) * 0.4, -3 + Math.cos(t * 0.7) * 0.8), r: 0.45 }, // red room -> glow room door
-  { path: (t) => new THREE.Vector3(-9 + Math.cos(t * 0.5) * 2.5, 1.5, 6 + Math.sin(t * 0.5) * 2), r: 0.4 }, // glow room
-  { path: (t) => new THREE.Vector3(1 + Math.cos(t * 0.4) * 2.2, 5.2 + Math.sin(t * 0.8) * 2, -2 + Math.sin(t * 0.4) * 3), r: 0.5 }, // atrium
-].map((d) => {
+const dyn = S.dynamic.map((d) => {
   const m = new THREE.Mesh(new THREE.SphereGeometry(d.r, 32, 16), dynMat);
   m.layers.set(1);
   scene.add(m);
@@ -184,12 +178,12 @@ probes.visible = false;
 scene.add(probes);
 
 const meter = gi.createMeter();
-const REF_POINT = new THREE.Vector3(0, 1.6, -40); // outdoor reference for auto exposure
+const REF_POINT = new THREE.Vector3(...S.refPoint); // outdoor reference for auto exposure
 
 // ---------------------------------------------------------------- UI / state
 const state = { gi: true, bakeStart: 0, bakeMs: 0, firstBakeDone: false, autoExposure: true, refLum: null, exposure: 1 };
 const input = new Input(canvas, $('joy'), $('knob'));
-const player = new Player(world.colliders);
+const player = new Player(world.colliders, S.spawn);
 
 const updateStats = () => ($('stats').textContent = `${gi.count} probes · ${gi.volumes.length} volumes · ${cfg.bounces} bounces · ${qName}`);
 updateStats();
@@ -206,7 +200,8 @@ function syncButtons() { for (const k in BTN) $(BTN[k]).classList.toggle('active
 for (const k in BTN) $(BTN[k]).onclick = () => (toggles[k] = !toggles[k]);
 $('btn-jump').onpointerdown = (e) => { e.preventDefault(); input.jump = true; };
 $('btn-throw').onpointerdown = (e) => { e.preventDefault(); input.fire++; };
-$('quality').onchange = (e) => { params.set('quality', e.target.value); location.search = params.toString(); };
+$('quality').onchange = (e) => reloadWith('quality', e.target.value);
+$('scene').onchange = (e) => reloadWith('scene', e.target.value);
 $('help-close').onclick = () => $('help').classList.add('hidden');
 
 const tod = $('tod');
@@ -302,8 +297,10 @@ const aoU = ao.aoMat.uniforms;
     renderer.setSize(innerWidth, innerHeight);
     ao.resize();
   });
+  f.add({ scene: S.id }, 'scene', Object.fromEntries(SCENES.map((s) => [s.name, s.id]))).name('scene (reload)')
+    .onChange((v) => reloadWith('scene', v));
   f.add({ quality: qName }, 'quality', Object.keys(PRESETS)).name('quality preset (reload)')
-    .onChange((v) => { params.set('quality', v); location.search = params.toString(); });
+    .onChange((v) => reloadWith('quality', v));
   f.close();
 }
 
@@ -418,4 +415,4 @@ sun.update(camera); // initialise every cascade before the bake samples them
 startBake();
 requestAnimationFrame((t) => { last = t; frame(t); });
 
-window.__gi = { gi, sun, ao, player, balls, camera, renderer, state, cfg, gui, setTimeOfDay };
+window.__gi = { gi, sun, ao, player, balls, camera, renderer, state, cfg, gui, setTimeOfDay, scene: S };

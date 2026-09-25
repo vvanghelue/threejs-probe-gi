@@ -104,12 +104,13 @@ export class Input {
 }
 
 export class Player {
-  constructor(colliders) {
+  /** spawn: { pos: [x, y, z] (feet), yaw, pitch } from the scene definition */
+  constructor(colliders, { pos = [0, 0, 0], yaw = 0, pitch = 0 } = {}) {
     this.colliders = colliders;
-    this.pos = new THREE.Vector3(0, 0, -30); // feet
+    this.pos = new THREE.Vector3(...pos); // feet
     this.vy = 0;
-    this.yaw = Math.PI; // facing +z (towards the building)
-    this.pitch = 0.05;
+    this.yaw = yaw;
+    this.pitch = pitch;
     this.radius = 0.3;
     this.height = 1.75;
     this.eye = 1.62;
