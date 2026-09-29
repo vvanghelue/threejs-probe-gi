@@ -335,6 +335,7 @@ function runBake(dtMs) {
     if (!state.firstBakeDone) {
       state.firstBakeDone = true;
       $('loader').classList.add('done');
+      if (params.get('debug') === 'gi') giDebugReport();
       setTimeout(() => $('loader').remove(), 800);
     }
     return;
@@ -414,5 +415,53 @@ player.update(0, { forward: 0, strafe: 0, mag: 0, lookX: 0, lookY: 0 }, camera);
 sun.update(camera); // initialise every cascade before the bake samples them
 startBake();
 requestAnimationFrame((t) => { last = t; frame(t); });
+
+// ?vis=0 disables Chebyshev visibility; ?debug=gi prints probe atlas readbacks on screen
+if (params.get('vis') === '0') gi.uniforms.giVisOn.value = 0;
+function giDebugReport() {
+  const gl = renderer.getContext();
+  const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+  const lines = [
+    'GPU: ' + (dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)),
+    'EXT_color_buffer_float: ' + !!gl.getExtension('EXT_color_buffer_float') +
+      ' · half: ' + !!gl.getExtension('EXT_color_buffer_half_float') +
+      ' · fragHighp: ' + (gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT).precision),
+    'vis=' + gi.uniforms.giVisOn.value,
+  ];
+  // sample a texture through a shader into an RGBA8 1x1 target (readback-safe on every GPU)
+  const rt = new THREE.WebGLRenderTarget(1, 1, { depthBuffer: false });
+  const mat = new THREE.ShaderMaterial({
+    uniforms: { tex: { value: null }, uv: { value: new THREE.Vector2() }, scale: { value: 1 } },
+    vertexShader: 'void main(){ gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: 'uniform sampler2D tex; uniform vec2 uv; uniform float scale; void main(){ gl_FragColor = clamp(abs(textureLod(tex, uv, 0.0)) * scale, 0.0, 1.0); }',
+    depthTest: false, depthWrite: false,
+  });
+  const qs = new THREE.Scene();
+  const q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat);
+  q.frustumCulled = false; qs.add(q);
+  const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  const buf = new Uint8Array(4);
+  const read = (tex, u, v, scale) => {
+    mat.uniforms.tex.value = tex; mat.uniforms.uv.value.set(u, v); mat.uniforms.scale.value = scale;
+    renderer.setRenderTarget(rt); renderer.render(qs, cam); renderer.setRenderTarget(null);
+    renderer.readRenderTargetPixels(rt, 0, 0, 1, 1, buf);
+    return Array.from(buf).map((b) => (b / 255 / scale).toFixed(2)).join(',');
+  };
+  const H = gi.display.height, dW = gi.depthRT.width, dH = gi.depthRT.height;
+  let shown = 0;
+  for (let i = 0; i < gi.count && shown < 6; i += 97) {
+    if (!gi.valid[i]) continue;
+    shown++;
+    const sh = read(gi.display.textures[0], ((i % 256) + 0.5) / 256, (Math.floor(i / 256) + 0.5) / H, 0.25);
+    const dp = read(gi.depthRT.texture, ((i % 128) * 16 + 8) / dW, (Math.floor(i / 128) * 16 + 8) / dH, 1 / 40);
+    lines.push(`#${i} SH0 ${sh} | depth ${dp}`);
+  }
+  lines.push('invalid probes: ' + gi.invalidCount + '/' + gi.count);
+  const el = document.createElement('pre');
+  el.style.cssText = 'position:fixed;left:4px;bottom:4px;z-index:99;background:#000c;color:#0f0;font:11px monospace;padding:6px;white-space:pre-wrap;max-width:98vw;pointer-events:none';
+  el.textContent = lines.join('\n');
+  document.body.appendChild(el);
+  console.log(lines.join('\n'));
+}
 
 window.__gi = { gi, sun, ao, player, balls, camera, renderer, state, cfg, gui, setTimeOfDay, scene: S };

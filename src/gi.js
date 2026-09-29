@@ -36,6 +36,7 @@ uniform float giEnabled;
 uniform float giIntensity;
 uniform float giCapture;
 uniform float giBias;
+uniform float giVisOn;
 
 vec2 giSignNZ(vec2 v) { return vec2(v.x >= 0.0 ? 1.0 : -1.0, v.y >= 0.0 ? 1.0 : -1.0); }
 vec2 giOctEncode(vec3 v) {
@@ -87,7 +88,7 @@ vec3 giVolumeIrradiance(int vi, vec3 P, vec3 N, vec3 V) {
     vec2 tile = vec2(float(idx % DW), float(idx / DW)) * GI_DEPTH_RES;
     // textureLod: no implicit derivatives in divergent control flow (breaks on Mali/Adreno)
     vec2 m = textureLod(giDepth, (tile + luv) / giDepthSize, 0.0).rg;
-    if (d > m.x) {
+    if (giVisOn > 0.5 && d > m.x) {
       float var = abs(m.y - m.x * m.x) + 0.04 * minS * minS;
       float dd = d - m.x;
       float vis = var / (var + dd * dd);
@@ -228,6 +229,7 @@ export class ProbeGI {
       giEnabled: { value: 0 },
       giIntensity: { value: 1 },
       giCapture: { value: 0 },
+      giVisOn: { value: 1 },
       giBias: { value: 0.88 }, // human tried 0.88, before : 0.4
     };
   }
