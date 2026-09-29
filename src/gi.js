@@ -85,7 +85,8 @@ vec3 giVolumeIrradiance(int vi, vec3 P, vec3 N, vec3 V) {
     vec3 dir = toP / max(d, 1e-4);
     vec2 luv = clamp((giOctEncode(dir) * 0.5 + 0.5) * GI_DEPTH_RES, vec2(0.5), vec2(GI_DEPTH_RES - 0.5));
     vec2 tile = vec2(float(idx % DW), float(idx / DW)) * GI_DEPTH_RES;
-    vec2 m = texture(giDepth, (tile + luv) / giDepthSize).rg;
+    // textureLod: no implicit derivatives in divergent control flow (breaks on Mali/Adreno)
+    vec2 m = textureLod(giDepth, (tile + luv) / giDepthSize, 0.0).rg;
     if (d > m.x) {
       float var = abs(m.y - m.x * m.x) + 0.04 * minS * minS;
       float dd = d - m.x;
